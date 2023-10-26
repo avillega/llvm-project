@@ -11,20 +11,72 @@
 //===----------------------------------------------------------------------===//
 
 #include "sanitizer_common.h"
+#include "sanitizer_flags.h"
 #include "sanitizer_placement_new.h"
 #include "sanitizer_stacktrace.h"
 #include "sanitizer_stacktrace_printer.h"
 #include "sanitizer_symbolizer.h"
+#include "sanitizer_symbolizer_markup.h"
 
 namespace __sanitizer {
 
 namespace {
 
-class StackTraceTextPrinter {
+class StackTraceProcessor {
  public:
-  StackTraceTextPrinter(const char *stack_trace_fmt, char frame_delimiter,
-                        InternalScopedString *output,
-                        InternalScopedString *dedup_token)
+  virtual bool ProcessAddressFrames(uptr pc) = 0;
+
+ protected:
+  ~StackTraceProcessor() {}
+};
+
+class StackTraceMarkupProcessor final : public StackTraceProcessor {
+ public:
+  StackTraceMarkupProcessor(InternalScopedString *output) : output_(output) {}
+
+  bool ProcessAddressFrames(uptr pc) override {
+    // This functionality is only supported on linux
+    #if !SANITIZER_SYMBOLIZER_FUCHSIA
+    SymbolizedStack *frames = Symbolizer::GetOrInit()->SymbolizePC(pc);
+
+    if (!frames)
+      return false;
+
+    MarkupStackTracePrinter *printer =
+        static_cast<MarkupStackTracePrinter *>(StackTracePrinter::GetOrInit());
+
+    const ListOfModules &modules =
+        Symbolizer::GetOrInit()->GetRefreshedListOfModules();
+    printer->RenderModules(output_, modules);
+
+    for (SymbolizedStack *cur = frames; cur; cur = cur->next) {
+      uptr prev_len = output_->length();
+
+      // format, info and vs_style are not needed when rendering symbolizer
+      // markup.
+      printer->RenderFrame(output_, /*format=*/nullptr, frame_num_++,
+                           cur->info.address,
+                           /*info=*/nullptr, /*vs_style=*/false);
+
+      if (prev_len != output_->length())
+        output_->AppendF("%c", frame_delimiter_);
+    }
+    frames->ClearAll();
+    return true;
+    #endif // !SANITIZER_SYMBOLIZER_FUCHSIA
+   }
+
+ private:
+  const char frame_delimiter_ = '\n';
+  uptr frame_num_ = 0;
+  InternalScopedString *output_;
+};
+
+class StackTraceTextProcessor final : public StackTraceProcessor {
+ public:
+  StackTraceTextProcessor(const char *stack_trace_fmt, char frame_delimiter,
+                          InternalScopedString *output,
+                          InternalScopedString *dedup_token)
       : stack_trace_fmt_(stack_trace_fmt),
         frame_delimiter_(frame_delimiter),
         output_(output),
@@ -32,7 +84,7 @@ class StackTraceTextPrinter {
         symbolize_(StackTracePrinter::GetOrInit()->RenderNeedsSymbolization(
             stack_trace_fmt)) {}
 
-  bool ProcessAddressFrames(uptr pc) {
+  bool ProcessAddressFrames(uptr pc) override {
     SymbolizedStack *frames = symbolize_
                                   ? Symbolizer::GetOrInit()->SymbolizePC(pc)
                                   : SymbolizedStack::New(pc);
@@ -95,8 +147,15 @@ void StackTrace::PrintTo(InternalScopedString *output) const {
   CHECK(output);
 
   InternalScopedString dedup_token;
-  StackTraceTextPrinter printer(common_flags()->stack_trace_format, '\n',
-                                output, &dedup_token);
+
+  StackTraceProcessor *processor;
+  if (common_flags()->enable_symbolizer_markup) {
+    processor =
+        new (GetGlobalLowLevelAllocator()) StackTraceMarkupProcessor(output);
+  } else {
+    processor = new (GetGlobalLowLevelAllocator()) StackTraceTextProcessor(
+        common_flags()->stack_trace_format, '\n', output, &dedup_token);
+  }
 
   if (trace == nullptr || size == 0) {
     output->AppendF("    <empty stack>\n\n");
@@ -107,7 +166,7 @@ void StackTrace::PrintTo(InternalScopedString *output) const {
     // PCs in stack traces are actually the return addresses, that is,
     // addresses of the next instructions after the call.
     uptr pc = GetPreviousInstructionPc(trace[i]);
-    CHECK(printer.ProcessAddressFrames(pc));
+    CHECK(processor->ProcessAddressFrames(pc));
   }
 
   // Always add a trailing empty line after stack trace.
@@ -173,7 +232,8 @@ int GetModuleAndOffsetForPc(uptr pc, char *module_name, uptr module_name_len,
   bool ok = Symbolizer::GetOrInit()->GetModuleNameAndOffsetForPC(
       pc, &found_module_name, pc_offset);
 
-  if (!ok) return false;
+  if (!ok)
+    return false;
 
   if (module_name && module_name_len) {
     internal_strncpy(module_name, found_module_name, module_name_len);
@@ -195,8 +255,17 @@ void __sanitizer_symbolize_pc(uptr pc, const char *fmt, char *out_buf,
   pc = StackTrace::GetPreviousInstructionPc(pc);
 
   InternalScopedString output;
-  StackTraceTextPrinter printer(fmt, '\0', &output, nullptr);
-  if (!printer.ProcessAddressFrames(pc)) {
+  StackTraceProcessor *processor;
+
+  if (common_flags()->enable_symbolizer_markup) {
+    processor =
+        new (GetGlobalLowLevelAllocator()) StackTraceMarkupProcessor(&output);
+  } else {
+    processor = new (GetGlobalLowLevelAllocator())
+        StackTraceTextProcessor(fmt, '\0', &output, nullptr);
+  }
+
+  if (!processor->ProcessAddressFrames(pc)) {
     output.clear();
     output.AppendF("<can't symbolize>");
   }
@@ -206,10 +275,12 @@ void __sanitizer_symbolize_pc(uptr pc, const char *fmt, char *out_buf,
 SANITIZER_INTERFACE_ATTRIBUTE
 void __sanitizer_symbolize_global(uptr data_addr, const char *fmt,
                                   char *out_buf, uptr out_buf_size) {
-  if (!out_buf_size) return;
+  if (!out_buf_size)
+    return;
   out_buf[0] = 0;
   DataInfo DI;
-  if (!Symbolizer::GetOrInit()->SymbolizeData(data_addr, &DI)) return;
+  if (!Symbolizer::GetOrInit()->SymbolizeData(data_addr, &DI))
+    return;
   InternalScopedString data_desc;
   StackTracePrinter::GetOrInit()->RenderData(&data_desc, fmt, &DI,
                                              common_flags()->strip_path_prefix);

@@ -51,6 +51,10 @@ class StackTracePrinter {
   ~StackTracePrinter() {}
 };
 
+// See sanitizer_symbolizer_markup.cpp for the fuhchsia implementation of
+// StackTracePrinter
+#if !SANITIZER_SYMBOLZER_FUCHSIA
+
 class FormattedStackTracePrinter : public StackTracePrinter {
  public:
   // Strip interceptor prefixes from function name.
@@ -109,6 +113,7 @@ class FormattedStackTracePrinter : public StackTracePrinter {
  protected:
   ~FormattedStackTracePrinter() {}
 };
+#endif // !SANITIZER_SYMBOLIZER_FUCHSIA
 
 }  // namespace __sanitizer
 

@@ -31,6 +31,7 @@ namespace __sanitizer {
 void ReportErrorSummary(const char *error_type, const AddressInfo &info,
                         const char *alt_tool_name) {
   if (!common_flags()->print_summary) return;
+
   InternalScopedString buff;
   buff.AppendF("%s ", error_type);
   StackTracePrinter::GetOrInit()->RenderFrame(
@@ -227,6 +228,7 @@ static void ReportDeadlySignalImpl(const SignalContext &sig, u32 tid,
   stack->Reset();
   unwind(sig, unwind_context, stack);
   stack->Print();
+  Printf("after stack print");
   MaybeDumpInstructionBytes(sig.pc);
   MaybeDumpRegisters(sig.context);
   Printf("%s can not provide additional info.\n", SanitizerToolName);

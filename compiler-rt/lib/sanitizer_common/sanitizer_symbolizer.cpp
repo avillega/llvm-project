@@ -129,6 +129,12 @@ Symbolizer::Symbolizer(IntrusiveList<SymbolizerTool> tools)
     : module_names_(&mu_), modules_(), modules_fresh_(false), tools_(tools),
       start_hook_(0), end_hook_(0) {}
 
+Symbolizer::Symbolizer(SymbolizerTool *tool)
+    : module_names_(&mu_), modules_(), modules_fresh_(false), tools_(),
+      start_hook_(0), end_hook_(0) {
+    tools_.push_back(tool);
+}
+
 Symbolizer::SymbolizerScope::SymbolizerScope(const Symbolizer *sym)
     : sym_(sym), errno_(errno) {
   if (sym_->start_hook_)

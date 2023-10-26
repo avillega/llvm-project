@@ -10,6 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 #include "sanitizer_common/sanitizer_stacktrace_printer.h"
+#include "sanitizer_common/sanitizer_symbolizer_markup.h"
 
 #include "gtest/gtest.h"
 #include "interception/interception.h"
@@ -19,6 +20,11 @@ namespace __sanitizer {
 class TestFormattedStackTracePrinter final : public FormattedStackTracePrinter {
  public:
   ~TestFormattedStackTracePrinter() {}
+};
+
+class TestMarkupStackTracePrinter final : public MarkupStackTracePrinter {
+  public:
+   ~TestMarkupStackTracePrinter() {}
 };
 
 TEST(FormattedStackTracePrinter, RenderSourceLocation) {
@@ -207,6 +213,21 @@ TEST(FormattedStackTracePrinter, RenderFrame) {
   str.clear();
 
   info.Clear();
+}
+
+TEST(MarkupStackTracePrinter, RenderFrame) {
+  TestMarkupStackTracePrinter markup_printer;
+  int frame_no = 42;
+  AddressInfo info;
+  info.address = 0xaa00;
+  InternalScopedString str;
+
+  markup_printer.RenderFrame(&str, "", frame_no, info.address, &info,  false);
+  EXPECT_NE(nullptr, internal_strstr(str.data(), "{{{bt:42:"));
+  EXPECT_NE(nullptr, internal_strstr(str.data(), "aa00"));
+  EXPECT_NE(nullptr, internal_strstr(str.data(), "}}}"));
+  str.clear();
+  info.Clear();    
 }
 
 }  // namespace __sanitizer

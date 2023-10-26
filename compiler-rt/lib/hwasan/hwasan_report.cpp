@@ -31,6 +31,7 @@
 #include "sanitizer_common/sanitizer_stackdepot.h"
 #include "sanitizer_common/sanitizer_stacktrace_printer.h"
 #include "sanitizer_common/sanitizer_symbolizer.h"
+#include "sanitizer_common/sanitizer_symbolizer_markup.h"
 
 using namespace __sanitizer;
 
@@ -269,6 +270,42 @@ static void PrintStackAllocations(const StackAllocationsRingBuffer *sa,
     Printf("%s\n", frame_desc.data());
     frame_desc.clear();
   }
+}
+
+static void PrintStackAllocationsMarkup(const StackAllocationsRingBuffer *sa) {
+  #if !SANITIZER_SYMBOLIZER_FUCHSIA
+  uptr frames = Min((uptr)flags()->stack_history_size, sa->size());
+
+  MarkupStackTracePrinter *printer =
+      static_cast<MarkupStackTracePrinter *>(StackTracePrinter::GetOrInit());
+
+  InternalScopedString modules_buff;
+
+  const ListOfModules &modules =
+      Symbolizer::GetOrInit()->GetRefreshedListOfModules();
+  printer->RenderModules(&modules_buff, modules);
+
+  Printf("%s\n", modules_buff.data());
+  modules_buff.clear();
+
+  InternalScopedString frame_desc;
+  Printf("Previously allocated frames:\n");
+  for (uptr i = 0; i < frames; i++) {
+    const uptr *record_addr = &(*sa)[i];
+    uptr record = *record_addr;
+    if (!record)
+      break;
+    uptr pc_mask = (1ULL << 48) - 1;
+    uptr pc = record & pc_mask;
+    if (SymbolizedStack *frame = Symbolizer::GetOrInit()->SymbolizePC(pc)) {
+      printer->RenderFrame(&frame_desc, "", 0, frame->info.address,
+                           &frame->info, false, nullptr);
+      frame->ClearAll();
+    }
+    Printf("%s\n", frame_desc.data());
+    frame_desc.clear();
+   }
+    #endif // !SANITIZER_SYMBOLIZER_FUCHSIA
 }
 
 // Returns true if tag == *tag_ptr, reading tags from short granules if
@@ -754,7 +791,13 @@ void BaseReport::PrintAddressDescription() const {
            sa.thread_id());
     Printf("%s", d.Default());
     announce_by_id(sa.thread_id());
-    PrintStackAllocations(sa.get(), ptr_tag, untagged_addr);
+
+    if (common_flags()->enable_symbolizer_markup) {
+      PrintStackAllocationsMarkup(sa.get());
+    } else {
+      PrintStackAllocations(sa.get(), ptr_tag, untagged_addr);
+    }
+
     num_descriptions_printed++;
   }
 

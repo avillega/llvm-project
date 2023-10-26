@@ -11,6 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "sanitizer_allocator_internal.h"
+#include "sanitizer_common.h"
 #include "sanitizer_internal_defs.h"
 #include "sanitizer_platform.h"
 #include "sanitizer_symbolizer_internal.h"
@@ -27,7 +28,7 @@ Symbolizer *Symbolizer::GetOrInit() {
 }
 
 // See sanitizer_symbolizer_markup.cpp.
-#if !SANITIZER_SYMBOLIZER_MARKUP
+#if !SANITIZER_SYMBOLIZER_FUCHSIA
 
 const char *ExtractToken(const char *str, const char *delims, char **result) {
   uptr prefix_len = internal_strcspn(str, delims);
@@ -189,6 +190,15 @@ void Symbolizer::RefreshModules() {
   fallback_modules_.fallbackInit();
   RAW_CHECK(modules_.size() > 0);
   modules_fresh_ = true;
+}
+
+const ListOfModules &Symbolizer::GetRefreshedListOfModules() {
+  if (!modules_fresh_) {
+    RefreshModules();
+  }
+
+  CHECK(modules_fresh_);
+  return modules_;    
 }
 
 static const LoadedModule *SearchForModule(const ListOfModules &modules,
@@ -566,6 +576,6 @@ bool SymbolizerProcess::WriteToSymbolizer(const char *buffer, uptr length) {
   return true;
 }
 
-#endif  // !SANITIZER_SYMBOLIZER_MARKUP
+#endif  // !SANITIZER_SYMBOLIZER_FUCHSIA
 
 }  // namespace __sanitizer

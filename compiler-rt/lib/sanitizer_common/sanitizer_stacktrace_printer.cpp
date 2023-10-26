@@ -12,21 +12,30 @@
 
 #include "sanitizer_stacktrace_printer.h"
 
+#include "sanitizer_common.h"
 #include "sanitizer_file.h"
 #include "sanitizer_flags.h"
 #include "sanitizer_fuchsia.h"
+#include "sanitizer_symbolizer_markup.h"
 
 namespace __sanitizer {
 
+#if !SANITIZER_SYMBOLIZER_FUCHSIA
+
 StackTracePrinter *StackTracePrinter::GetOrInit() {
   static StackTracePrinter *stacktrace_printer;
-  static StaticSpinMutex init_mu;
-  SpinMutexLock l(&init_mu);
+  static StaticSpinMutex stacktrace_printer_init_mu;
+  SpinMutexLock l(&stacktrace_printer_init_mu);
   if (stacktrace_printer)
     return stacktrace_printer;
 
-  stacktrace_printer =
-      new (GetGlobalLowLevelAllocator()) FormattedStackTracePrinter();
+  if (common_flags()->enable_symbolizer_markup) {
+    stacktrace_printer =
+        new (GetGlobalLowLevelAllocator()) MarkupStackTracePrinter();
+  } else {
+    stacktrace_printer =
+        new (GetGlobalLowLevelAllocator()) FormattedStackTracePrinter();
+  }
 
   CHECK(stacktrace_printer);
   return stacktrace_printer;
@@ -58,9 +67,6 @@ const char *FormattedStackTracePrinter::StripFunctionName(
   }
   return function;
 }
-
-// sanitizer_symbolizer_markup.cpp implements these differently.
-#if !SANITIZER_SYMBOLIZER_MARKUP
 
 static const char *DemangleFunctionName(const char *function) {
   if (!common_flags()->demangle)
@@ -136,7 +142,7 @@ static const char *DemangleFunctionName(const char *function) {
     return "pthread_curcpu_np";
   if (!internal_strcmp(function, "__libc_thr_sigsetmask"))
     return "pthread_sigmask";
-#endif
+#  endif
 
   return function;
 }
@@ -322,8 +328,6 @@ void FormattedStackTracePrinter::RenderData(InternalScopedString *buffer,
   }
 }
 
-#endif  // !SANITIZER_SYMBOLIZER_MARKUP
-
 void FormattedStackTracePrinter::RenderSourceLocation(
     InternalScopedString *buffer, const char *file, int line, int column,
     bool vs_style, const char *strip_path_prefix) {
@@ -352,5 +356,7 @@ void FormattedStackTracePrinter::RenderModuleLocation(
   }
   buffer->AppendF("+0x%zx)", offset);
 }
+
+#endif // !SANITIZER_SYMBOLIZER_FUCHSIA
 
 } // namespace __sanitizer

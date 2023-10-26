@@ -154,6 +154,11 @@ class Symbolizer final {
 
   void InvalidateModuleList();
 
+#if !SANITIZER_SYMBOLIZER_FUCHSIA
+  // Returns the list of modules refreshing it if necessary;
+  const ListOfModules &GetRefreshedListOfModules();
+#endif // SANITIZER_SYMBOLIZER_FUCHSIA
+
  private:
   // GetModuleNameAndOffsetForPC has to return a string to the caller.
   // Since the corresponding module might get unloaded later, we should create
@@ -201,6 +206,7 @@ class Symbolizer final {
   IntrusiveList<SymbolizerTool> tools_;
 
   explicit Symbolizer(IntrusiveList<SymbolizerTool> tools);
+  explicit Symbolizer(SymbolizerTool *tool);
 
   static LowLevelAllocator symbolizer_allocator_;
 
